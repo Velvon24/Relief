@@ -188,9 +188,9 @@ main{position:relative;min-width:0;min-height:0;background:var(--view);overflow:
     </div>
   </main>
 </div>
-<div class="modal" id="mPresets"><div class="dlg"><div style="display:flex;justify-content:space-between;align-items:start"><div><h2>Vorlagen</h2><div class="hint">Startpunkt wählen und dann frei weiterbearbeiten.</div></div><div style="display:flex;gap:6px"><button class="btn" id="bSavePreset">＋ Aktuelles Design als Vorlage</button><button class="btn" id="bExportPresets" title="Alle eigenen Vorlagen als Datei sichern – zum Mitnehmen auf ein anderes Gerät oder für die Webseite">⤓ Meine Vorlagen exportieren</button><label class="btn" title="Vorlagen-Datei laden">⤒ Importieren<input type="file" id="iImportPresets" accept=".json,application/json" hidden></label><button class="btn" data-close>Schließen</button></div></div><div class="grid" id="presetGrid"></div></div></div>
+<div class="modal" id="mPresets"><div class="dlg"><div style="display:flex;justify-content:space-between;align-items:start"><div><h2>Vorlagen</h2><div class="hint">Startpunkt wählen und dann frei weiterbearbeiten.</div></div><div style="display:flex;gap:6px"><button class="btn" id="bSavePreset">＋ Aktuelles Design als Vorlage</button><button class="btn" style="display:none" id="bExportPresets" title="Alle eigenen Vorlagen als Datei sichern – zum Mitnehmen auf ein anderes Gerät oder für die Webseite">⤓ Meine Vorlagen exportieren</button><label class="btn" style="display:none" title="Vorlagen-Datei laden">⤒ Importieren<input type="file" id="iImportPresets" accept=".json,application/json" hidden></label><button class="btn" data-close>Schließen</button></div></div><div class="grid" id="presetGrid"></div></div></div>
 <div class="modal" id="mProjects"><div class="dlg"><div style="display:flex;justify-content:space-between;align-items:start"><div><h2>Meine Projekte</h2><div class="hint">Gespeichert in diesem Browser. Für ein Backup als Datei exportieren.</div></div><button class="btn" data-close>Schließen</button></div>
-  <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap"><button class="btn" id="bNew">Neues Projekt</button><button class="btn" id="bExport">Als Datei exportieren (.json)</button><label class="btn">Datei importieren<input type="file" id="fImport" accept=".json,application/json" hidden></label></div>
+  <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap"><button class="btn" id="bNew">Neues Projekt</button><button class="btn" style="display:none" id="bExport">Als Datei exportieren (.json)</button><label class="btn" style="display:none">Datei importieren<input type="file" id="fImport" accept=".json,application/json" hidden></label></div>
   <div class="plist" id="plist"></div></div></div>
 <div class="modal" id="mAsk" style="z-index:60"><div class="dlg" style="max-width:420px"><h2 id="askTitle">Name</h2><input type="text" id="askInput" style="width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:8px;font:inherit;margin:8px 0 12px"><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="askCancel">Abbrechen</button><button class="btn primary" id="askOk">OK</button></div></div></div>
 <div class="toast" id="toast"></div>
@@ -3594,7 +3594,7 @@ $('#pname').addEventListener('input', e => { P.name = e.target.value; commitLate
 const projects = () => store.get('relief.projects', {});
 $('#bSave').addEventListener('click', () => {
   const all = projects(); all[P.name || 'Ohne Namen'] = { P, t: Date.now() };
-  toast(store.set('relief.projects', all) ? `„${P.name}“ gespeichert.` : 'Speichern im Browser nicht möglich – nutze „Als Datei exportieren“.');
+  toast(store.set('relief.projects', all) ? `„${P.name}“ gespeichert.` : 'Speichern im Browser nicht möglich.');
 });
 function showModal(id, on = true) { $(id).classList.toggle('show', on); }
 document.querySelectorAll('.modal').forEach(m => m.addEventListener('click', e => { if (e.target === m || e.target.hasAttribute('data-close')) showModal('#' + m.id, false); }));
@@ -3680,7 +3680,7 @@ $('#bPresets').addEventListener('click', () => {
 });
 
 // Start
-const BUILD_TAG = '10.11. 11:01'; { const b = $('#buildTag'); if (b) { b.textContent = 'Stand ' + BUILD_TAG; b.title = 'Version der App'; } }
+const BUILD_TAG = '10.11. 11:08'; { const b = $('#buildTag'); if (b) { b.textContent = 'Stand ' + BUILD_TAG; b.title = 'Version der App'; } }
 renderSections();
 initGL();
 window.relief = { get renderer() { return renderer; }, get model() { return model; } };
