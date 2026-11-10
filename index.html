@@ -359,20 +359,30 @@ function makeCells(P) {
       else cells.push([[x0 - s / 2, y0 + hgt], [x0, y0], [x0 + s / 2, y0 + hgt]]);
     }
   } else if (t === 'radial') {
-    const rMax = Math.hypot(hw, hh); const r0 = s * 0.55;
+    // Ringe aus Kreissegmenten. Jede Ringgrenze ist ein gemeinsamer Polygonzug durch alle Teilungspunkte beider Nachbarringe –
+    // so passen innere und äußere Kante exakt aufeinander (keine Überlappung, keine Lücke).
+    const rMax = Math.hypot(hw, hh); const r0 = s * 0.55, TAU = Math.PI * 2;
     const n1 = Math.max(5, Math.round((2 * Math.PI * (r0 + s / 2)) / s));
-    cells.push(Array.from({ length: n1 }, (_, k) => { const a = (k / n1) * Math.PI * 2; return [r0 * Math.cos(a), r0 * Math.sin(a)]; }));
-    let r = r0, ring = 0;
-    while (r < rMax) {
-      const r2 = r + s * 0.9, rm = (r + r2) / 2; const n = Math.max(5, Math.round((2 * Math.PI * rm) / s));
-      const off = ring % 2 ? 0.5 : 0;
-      for (let k = 0; k < n; k++) {
-        const a0 = ((k + off) / n) * Math.PI * 2, a1 = ((k + 1 + off) / n) * Math.PI * 2, am = (a0 + a1) / 2;
-        const pts = [[r * Math.cos(a0), r * Math.sin(a0)], [r2 * Math.cos(a0), r2 * Math.sin(a0)], [r2 * Math.cos(am), r2 * Math.sin(am)], [r2 * Math.cos(a1), r2 * Math.sin(a1)], [r * Math.cos(a1), r * Math.sin(a1)]];
+    const rings = []; { let r = r0, ring = 0; while (r < rMax) { const r2 = r + s * 0.9, rm = (r + r2) / 2; const n = Math.max(5, Math.round((2 * Math.PI * rm) / s)); rings.push({ r, r2, n, off: ring % 2 ? 0.5 : 0 }); r = r2; ring++; } }
+    const brk = (g) => Array.from({ length: g.n }, (_, k) => (((k + g.off) / g.n) * TAU) % TAU);
+    const mids = (g) => Array.from({ length: g.n }, (_, k) => (((k + 0.5 + g.off) / g.n) * TAU) % TAU);
+    // Winkel je Grenzkreis: Grenze k liegt bei rings[k].r (k = 0: Rand der Mitte)
+    const S = rings.map((g, k) => { const A = brk(g).slice(); if (k === 0) for (let i = 0; i < n1; i++) A.push((i / n1) * TAU); else { const h = rings[k - 1]; A.push(...brk(h), ...mids(h)); } return [...new Set(A.map(v => Math.round(v * 1e9) / 1e9))].sort((x, y) => x - y); });
+    const Sout = rings.map((g, k) => { const A = brk(g).concat(mids(g)); if (k + 1 < rings.length) A.push(...brk(rings[k + 1])); return [...new Set(A.map(v => Math.round(v * 1e9) / 1e9))].sort((x, y) => x - y); });
+    const between = (set, a0, a1) => { const span = ((a1 - a0) % TAU + TAU) % TAU || TAU; return set.map(v => ({ v, d: ((v - a0) % TAU + TAU) % TAU })).filter(o => o.d > 1e-7 && o.d < span - 1e-7).sort((x, y) => x.d - y.d).map(o => a0 + o.d); };
+    const P = (r, a) => [r * Math.cos(a), r * Math.sin(a)];
+    const c0 = rings.length ? S[0] : Array.from({ length: n1 }, (_, i) => (i / n1) * TAU);
+    cells.push(c0.map(a => P(r0, a)));
+    rings.forEach((g, k) => {
+      for (let i = 0; i < g.n; i++) {
+        const a0 = ((i + g.off) / g.n) * TAU, a1 = ((i + 1 + g.off) / g.n) * TAU;
+        const pts = [P(g.r, a0), P(g.r2, a0)];
+        for (const a of between(Sout[k], a0, a1)) pts.push(P(g.r2, a));
+        pts.push(P(g.r2, a1), P(g.r, a1));
+        for (const a of between(S[k], a0, a1).reverse()) pts.push(P(g.r, a));
         cells.push(pts);
       }
-      r = r2; ring++;
-    }
+    });
   } else { // voronoi / Sonnenblume
     let sites = [];
     if (t === 'sunflower') {
@@ -421,7 +431,7 @@ function makeCells(P) {
     const vor = () => sites.map(p => {
       let poly = [[p[0] - lim, p[1] - lim], [p[0] + lim, p[1] - lim], [p[0] + lim, p[1] + lim], [p[0] - lim, p[1] + lim]];
       for (const q of sites) {
-        if (q === p) continue; const dx = q[0] - p[0], dyy = q[1] - p[1]; if (Math.abs(dx) > lim || Math.abs(dyy) > lim) continue;
+        if (q === p) continue; const dx = q[0] - p[0], dyy = q[1] - p[1]; if (lim * (Math.abs(dx) + Math.abs(dyy)) <= (dx * dx + dyy * dyy) / 2) continue; // Mittelsenkrechte schneidet das Suchfeld nicht
         poly = clipHalf(poly, dx, dyy, (dx * (p[0] + q[0])) / 2 + (dyy * (p[1] + q[1])) / 2);
         if (poly.length < 3) break;
       }
@@ -3680,7 +3690,7 @@ $('#bPresets').addEventListener('click', () => {
 });
 
 // Start
-const BUILD_TAG = '10.11. 11:08'; { const b = $('#buildTag'); if (b) { b.textContent = 'Stand ' + BUILD_TAG; b.title = 'Version der App'; } }
+const BUILD_TAG = '10.11. 11:24'; { const b = $('#buildTag'); if (b) { b.textContent = 'Stand ' + BUILD_TAG; b.title = 'Version der App'; } }
 renderSections();
 initGL();
 window.relief = { get renderer() { return renderer; }, get model() { return model; } };
