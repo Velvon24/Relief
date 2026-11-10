@@ -1695,6 +1695,7 @@ function prismHoles(outer, holes, za, zb) {
 function screwDims(F) { const rh = F.screwD / 2 + 0.2, rk = F.headD / 2 + 0.3; const zc = Math.max(0.6, F.base - (rk - rh)); const rTop = Math.min(rk, rh + (F.base - zc)); const protrude = Math.max(0, (F.headD / 2 - F.screwD / 2) - (F.base - zc)); return { rh, rk, zc, rTop, protrude }; }
 // Markierungen für die Vorschau (Polygone + Höhe des gravierten Bodens)
 function labelDecals(p, P) {
+  return null; // Rahmen ohne Gravur – Nummern stehen auf der Karte (A4-PDF) und unter jedem Teil
   const F = P.frame; if (!F.labels || F.base < ENGRAVE + 1.2) return null;
   const plain = !(p.screw && F.screws) && !p.mag && !(p.notches && p.notches.length);
   if (F.light && F.lightLabels === false && plain) return null; // offene Tasche ohne Nummern-Steg: keine Gravur
@@ -1985,8 +1986,8 @@ function cupMesh(p, P, opt) {
   let F = F0;
   // Gitter/Leichtbau: Taschen ohne Schraube/Magnet/Verbinder bekommen keinen vollen Boden – dort auch keine Gravur (Nummern stehen auf der Karte 1:1 und unter jedem Teil)
   const plain = !(p.screw && F0.screws) && !p.mag && !(p.notches && p.notches.length);
-  const barLab = F0.light && plain && F0.labels && F0.lightLabels !== false && F0.base >= ENGRAVE + 1.2; // offenes Gitter: Nummer + Pfeil auf einem schmalen Steg quer durch die Tasche
-  const lab = labelsOn(P, opt) && F0.base >= ENGRAVE + 1.2 && (!(F0.light && plain) || barLab);
+  const barLab = false && F0.light && plain && F0.labels && F0.lightLabels !== false && F0.base >= ENGRAVE + 1.2; // offenes Gitter: Nummer + Pfeil auf einem schmalen Steg quer durch die Tasche
+  const lab = false && labelsOn(P, opt) && F0.base >= ENGRAVE + 1.2 && (!(F0.light && plain) || barLab);
   if (lab) F = { ...F0, base: F0.base - ENGRAVE, depth: F0.depth + ENGRAVE };
   const top = F.base + F.depth; const O = p.cell, I = p.pocket;
   const screw = !!(p.screw && F.screws);
@@ -2184,12 +2185,7 @@ function to3MF(objects, bambu) {
       for (let pl = 1; pl <= nPl; pl++) g += `  <plate>\n    <plate_info id="${pl}"/>\n    <layer top_z="${cc.z.toFixed(2)}" type="0" extruder="1" color="${cc.color.toUpperCase()}" extra="" gcode="M600"/>\n    <mode value="SingleExtruder"/>\n  </plate>\n`;
       g += '</custom_gcodes_per_layer>\n'; files.push({ name: 'Metadata/custom_gcode_per_layer.xml', data: g });
     }
-    const n = bambu.colors.length;
-    // echte Bambu-Filamente: Profilname je Drucker, damit Bambu Studio Material und Farbe direkt zuordnet
-    const sfx = ({ h2d: 'H2D', h2d2: 'H2D', x1: 'X1C', mini: 'A1M' })[bambu.printer] || '';
-    const fl = bambu.colors.map((c, i) => filamentByKey((bambu.fils || [])[i]));
-    const prof = (f) => f && sfx && !(f[0] === 'PLA-CF' && sfx === 'H2D') ? `Bambu ${f[0]} @BBL ${sfx}` : 'Generic PLA';
-    files.push({ name: 'Metadata/project_settings.config', data: JSON.stringify({ filament_colour: bambu.colors.map(c => c.toUpperCase()), filament_type: fl.map(f => f && f[0] === 'PLA-CF' ? 'PLA-CF' : 'PLA'), filament_vendor: fl.map(f => f ? 'Bambu Lab' : 'Generic'), filament_ids: fl.map(f => f ? f[1] : 'GFL99'), filament_settings_id: fl.map(prof), different_settings_to_system: [], name: 'project_settings', from: 'project', version: '02.00.00.00' }, null, 4) });
+    // keine Filament-/Druckerprofile mitschicken: Bambu Studio nimmt die Profile und Farben, die am Drucker bzw. im Projekt eingestellt sind
   }
   return files;
 }
@@ -2227,6 +2223,59 @@ function mapSVG(model) {
   s += `<text x="${m}" y="${(m * 0.7).toFixed(1)}" font-size="5" fill="#333">${esc(P.name)} · Karte 1:1 · Zahl = Teilnummer · Punkt = Farbe · K = Rahmenkachel · roter Kreis = Schraube · blaues Quadrat = Steckverbinder</text>`;
   s += `<line x1="${m}" y1="${H - 3}" x2="${m + 100}" y2="${H - 3}" stroke="#000" stroke-width="0.5"/><text x="${m + 102}" y="${H - 2}" font-size="3.5">100 mm (zum Prüfen des Druckmaßstabs)</text>`;
   return s + '\n</svg>';
+}
+
+// Karte als A4-PDF (maßstäblich verkleinert, eine Seite): Teilnummer, Farbe, Kachel, Schrauben
+function mapPDF(model) {
+  const { P, pieces, tiles, bounds } = model;
+  const mm = 72 / 25.4, EW = bounds.maxx - bounds.minx, EH = bounds.maxy - bounds.miny;
+  const land = EW > EH * 1.05; const PW = (land ? 297 : 210), PH = (land ? 210 : 297);
+  const mL = 12, mT = 22, mB = 26; const aw = PW - 2 * mL, ah = PH - mT - mB;
+  const sc = Math.min(aw / EW, ah / EH); const ox = mL + (aw - EW * sc) / 2, oy = mB + (ah - EH * sc) / 2;
+  const X = (x) => ((ox + (x - bounds.minx) * sc) * mm).toFixed(2), Y = (y) => ((oy + (y - bounds.miny) * sc) * mm).toFixed(2);
+  const rgb = (h) => { const n = parseInt((h || '#888').slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(v => (v / 255).toFixed(3)).join(' '); };
+  const lat = (t) => { let o = ''; for (const ch of String(t)) { const c = ch.charCodeAt(0); o += c < 256 ? ch : '?'; } return o.replace(/[\\()]/g, (c) => '\\' + c); };
+  const tw = (t, size) => { let w = 0; for (const ch of String(t)) w += /[0-9]/.test(ch) ? 0.556 : /[il·.,: ]/.test(ch) ? 0.28 : /[mwMW]/.test(ch) ? 0.85 : /[A-Z]/.test(ch) ? 0.68 : 0.53; return w * size; };
+  const text = (x, y, size, t, col = '0 0 0', align = 'l', bold = false) => { const xx = align === 'c' ? x - tw(t, size) / 2 : x; return `${col} rg BT /${bold ? 'F2' : 'F1'} ${size.toFixed(2)} Tf ${xx.toFixed(2)} ${y.toFixed(2)} Td (${lat(t)}) Tj ET\n`; };
+  const circ = (cx, cy, r) => { const k = 0.5523 * r; return `${(cx + r).toFixed(2)} ${cy.toFixed(2)} m ${(cx + r).toFixed(2)} ${(cy + k).toFixed(2)} ${(cx + k).toFixed(2)} ${(cy + r).toFixed(2)} ${cx.toFixed(2)} ${(cy + r).toFixed(2)} c ${(cx - k).toFixed(2)} ${(cy + r).toFixed(2)} ${(cx - r).toFixed(2)} ${(cy + k).toFixed(2)} ${(cx - r).toFixed(2)} ${cy.toFixed(2)} c ${(cx - r).toFixed(2)} ${(cy - k).toFixed(2)} ${(cx - k).toFixed(2)} ${(cy - r).toFixed(2)} ${cx.toFixed(2)} ${(cy - r).toFixed(2)} c ${(cx + k).toFixed(2)} ${(cy - r).toFixed(2)} ${(cx + r).toFixed(2)} ${(cy - k).toFixed(2)} ${(cx + r).toFixed(2)} ${cy.toFixed(2)} c h\n`; };
+  const poly = (pts) => pts.map((q, i) => `${X(q[0])} ${Y(q[1])} ${i ? 'l' : 'm'}`).join(' ') + ' h\n';
+  const tileCols = ['#e6f0f3', '#f6eddc', '#e9f2e3', '#f3e6ee', '#ecebf6', '#f6f1dc'];
+  const multi = tiles.length > 1;
+  let c = '0.3 w 1 j\n';
+  pieces.forEach(p => { c += `${rgb(multi ? tileCols[(p.tile - 1) % tileCols.length] : '#ffffff')} rg 0.2 0.2 0.2 RG ` + poly(p.cell) + 'B\n'; });
+  (model.fillers || []).forEach(f => { c += `0.75 0.75 0.75 rg 0.2 0.2 0.2 RG ` + poly(f.cell) + 'B\n'; });
+  const cellPt = Math.sqrt(EW * EH / Math.max(1, pieces.length)) * sc * mm;
+  const fs = Math.max(3.2, Math.min(11, cellPt * 0.3));
+  pieces.forEach(p => {
+    const cx = +X(p.c[0]), cy = +Y(p.c[1]);
+    c += `${rgb(p.color)} rg 0.35 0.35 0.35 RG 0.25 w ` + circ(cx, cy + fs * 0.95, fs * 0.33) + 'B\n';
+    c += text(cx, cy - fs * 0.35, fs, String(p.num), '0.07 0.07 0.07', 'c', true);
+    if (p.screw && P.frame.screws) { const s0 = p.sc || p.c; c += `0.8 0 0 RG 0.6 w ` + circ(+X(s0[0]), +Y(s0[1]), Math.max(1.5, P.frame.headD / 2 * sc * mm)) + 'S\n'; }
+  });
+  if (multi) tiles.forEach(t => { let cx = 0, cy = 0; t.pieces.forEach(p => { cx += p.c[0]; cy += p.c[1]; }); cx /= t.pieces.length; cy /= t.pieces.length; c += text(+X(cx), +Y(cy), fs * 2.2, 'K' + t.id, '0.12 0.32 0.4', 'c', true); });
+  // Kopf und Legende
+  const top = PH * mm;
+  c += text(mL * mm, top - 12 * mm, 14, P.name || 'Relief', '0 0 0', 'l', true);
+  c += text(mL * mm, top - 17.5 * mm, 8.5, `Karte · ${Math.round(EW)} × ${Math.round(EH)} mm · Maßstab ca. 1:${(1 / sc).toFixed(1)} · Ansicht von vorne · ${pieces.length} Teile`, '0.3 0.3 0.3');
+  let lx = mL * mm, ly = 19 * mm;
+  model.colorList.forEach((col, i) => { const f = filamentByKey((model.colorFil || [])[i]); const name = f ? filLabel(f) : colorName(col); const n = pieces.filter(p => p.ci === i).length; const lab = `${name} (${n})`;
+    if (lx + tw(lab, 8) + 20 > (PW - mL) * mm) { lx = mL * mm; ly -= 5 * mm; }
+    c += `${rgb(col)} rg 0.35 0.35 0.35 RG 0.25 w ` + circ(lx + 3, ly + 2.8, 3) + 'B\n' + text(lx + 9, ly, 8, lab, '0.15 0.15 0.15'); lx += tw(lab, 8) + 24; });
+  c += text(mL * mm, 6 * mm, 7, `Zahl = Teilnummer (steht auch unten auf jedem Teil)${P.frame.screws ? ' · roter Kreis = Schraube' : ''}${multi ? ' · K = Rahmenkachel' : ''}`, '0.4 0.4 0.4');
+  // PDF zusammensetzen
+  const objs = [];
+  objs.push('<< /Type /Catalog /Pages 2 0 R >>');
+  objs.push('<< /Type /Pages /Kids [3 0 R] /Count 1 >>');
+  objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${(PW * mm).toFixed(2)} ${(PH * mm).toFixed(2)}] /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 4 0 R >>`);
+  objs.push(`<< /Length ${c.length} >>\nstream\n${c}endstream`);
+  objs.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
+  objs.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
+  let out = '%PDF-1.4\n%\xe2\xe3\xcf\xd3\n'; const offs = [];
+  objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('');
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  const b = new Uint8Array(out.length); for (let i = 0; i < out.length; i++) b[i] = out.charCodeAt(i) & 255; return b;
 }
 
 // Bohr-/Montageplan 1:1: Umriss, Kacheln, Schrauben (S1…), Klebepads, Linien; Maße ab linker oberer Ecke
@@ -2296,61 +2345,10 @@ function printKitFiles(model) {
     let x = 10; const out = objs.map(o => { const b = bbox(o.mesh); const r = { name: o.name, mesh: localize(o.mesh, -b.x0, -b.y0, 0), tx: x, ty: 10, tz: 0 }; x += b.w + 8; return r; });
     files.push({ path: `${slug}/0_passungstest.3mf`, zip: to3MF(out) });
   }
-  files.push({ path: `${slug}/karte-1zu1.svg`, data: mapSVG(model) });
+  files.push({ path: `${slug}/karte-a4.pdf`, data: mapPDF(model) });
   const mp = mountPlan(model);
   const mount = F.mount || 'wall';
   files.push({ path: `${slug}/${mount === 'board' ? 'traegerplatte-1zu1.svg' : mount === 'tape' ? 'klebepads-1zu1.svg' : 'bohrschablone-1zu1.svg'}`, data: mp.svg });
-  files.push({ path: `${slug}/projekt.json`, data: JSON.stringify(P, null, 2) });
-  const st = stats(model);
-  const counts = model.colorList.map((c, i) => `  Farbe ${i + 1} (${c}): ${pieces.filter(p => p.ci === i).length} Teile, ${plates.filter(p => p.ci === i).length} Platte(n)`).join('\n');
-  const prn = PRINTERS[P.print.printer] ? PRINTERS[P.print.printer].name : 'eigener Drucker';
-  files.push({ path: `${slug}/LIESMICH.txt`, data:
-`${P.name} – Druckkit
-=====================
-Größe: ${P.size.w} × ${P.size.h} mm   Teile: ${st.pieces}   Tiefe: ${st.depth} mm   Gewicht ca. ${st.weight} g
-Drucker: ${prn} (Druckbett ${B0.w} × ${B0.d} mm)
-
-Farben:
-${counts}
-  Rahmen (${P.colors.frame}): ${tiles.length} Kachel(n), ${st.connectors} Steckverbinder, ${st.screws} Schrauben
-
-Material: PLA.${F.fit === 'magnet' ? ` Magnete: ${st.magnets * 2} × Neodym ${F.magD} × ${F.magH} mm.` : ''}${mount === 'tape' ? ` Klebepads: ${tiles.reduce((a, t) => a + t.pads.length, 0)} Stück (doppelseitig, je mind. ${((F.padLoad || 400) * 4 / 1000).toFixed(1)} kg Tragkraft laut Hersteller).` : mount === 'board' ? ` Schrauben: ${st.screws} × Senkkopf-Holzschraube ${F.screwD} × 12–16 mm, Trägerplatte 6–10 mm Sperrholz/MDF, 2 Bilderaufhänger.` : ` Schrauben: ${st.screws} × Senkkopf ${F.screwD} mm (Kopf ≤ ${F.headD} mm), Länge nach Wand + Dübel.`}
-
-0. ZUERST 0_passungstest.3mf drucken (wenige Minuten).
-   Das Test-Teil muss sich mit festem Daumendruck in die Tasche drücken lassen und halten.
-   ${F.fit === 'press' ? `Zu stramm → in der App „Klemmung“ verringern. Zu locker → erhöhen. (aktuell ${F.squeeze} mm)` : F.fit === 'magnet' ? `Magnet-Modus: Scheibenmagnet ${F.magD} × ${F.magH} mm muss in die Aussparungen passen.` : 'Kleber-Modus: Teil sitzt locker, ein Tropfen Kleber pro Teil.'}
-   Senkkopf testen: Schraube muss bündig oder tiefer sitzen.
-
-1. Teile – am einfachsten: 1_bambu-projekt-teile.3mf in Bambu Studio öffnen (Datei → Projekt öffnen).
-   Darin ist jede Druckplatte schon angelegt und jede Farbe als eigenes Filament eingetragen:
-${model.colorList.map((c, i) => { const f = filamentByKey((model.colorFil || [])[i]); return `     Filament ${i + 1} = ${f ? filLabel(f) : colorName(c)} (${c})`; }).join('\n')}
-   Fragt Bambu Studio, ob die Einstellungen aus dem Projekt geladen werden sollen: „Ja“. Danach Drucker „${prn}“
-   wählen und in der Filamentliste prüfen, ob die Farben stimmen (ggf. dem passenden AMS-Slot zuordnen).
-   Alternativ: Jede Datei in teile/ ist eine einzelne Platte in EINER Farbe, der Farbname steht im Dateinamen
-   (z. B. farbe-1-${colorName(model.colorList[0], (model.colorFil || [])[0])}_platte-1.3mf). Dann einfach das passende Filament wählen.
-   Drucker „${prn}“ wählen, drucken.
-   Slicer-Einstellung Teile: ${P.print.infill == null ? 30 : P.print.infill} % Füllung, 2–3 Wände. Rahmen: ${P.print.frameInfill == null ? 60 : P.print.frameInfill} % Füllung, 3 Wände (die Klemmrippen brauchen Wände, keine Füllung).
-   Keine Stützen nötig. Die Teile stehen auf ihrer Unterseite.${P.print.printer === 'h2d2' ? '\n   H2D mit zwei Düsen: Du kannst zwei Farb-Dateien auf eine Platte legen und jeder Datei eine Düse zuweisen.' : ''}
-
-2. Rahmen: 2_bambu-projekt-rahmen.3mf (alle Kacheln als Platten) oder einzeln aus rahmen/ – flach drucken, keine Stützen.
-
-3. karte-1zu1.svg in Originalgröße drucken (100-mm-Linie nachmessen) und als Schablone an die Wand kleben.
-   Zahl = Teilnummer (= Objektname im Slicer), K = Kachel, roter Kreis = Schraube, blaues Quadrat = Steckverbinder.
-
-4. Befestigung – ${mount === 'board' ? 'auf Trägerplatte' : mount === 'tape' ? 'mit Klebepads (ohne Bohren)' : 'mit Schrauben in der Wand'}:
-${mount === 'board' ? `   - traegerplatte-1zu1.svg drucken, auf die Holzplatte kleben, entlang der gestrichelten Linie aussägen
-     (5 mm kleiner als das Paneel, damit die Platte unsichtbar bleibt). Löcher S1…S${mp.list.length} vorbohren (2 mm).
-   - Kacheln in Nummernreihenfolge (K1, K2 …) auflegen, über die Schwalbenschwänze zusammenstecken und festschrauben.
-   - Zwei Bilderaufhänger an den markierten Stellen auf die Rückseite schrauben, Platte wie ein Bild aufhängen.` : mount === 'tape' ? `   - Wand entstauben und mit Alkohol entfetten (Pads halten nur auf glatten, tragfähigen Flächen, nicht auf Raufaser).
-   - Kacheln in Nummernreihenfolge (K1, K2 …) zusammenstecken. Pads an den grün markierten Stellen auf die Rückseite kleben
-     (klebepads-1zu1.svg zeigt sie von vorne gesehen). Kachel 30 Sekunden fest an die Wand drücken.
-   - Teile erst nach 1 Stunde einsetzen, damit die Pads aushärten.` : `   - bohrschablone-1zu1.svg ausdrucken (große Pläne als Poster/auf mehreren Blättern), mit Wasserwaage an die Wand kleben
-     und an den roten Kreuzen S1…S${mp.list.length} bohren. Alternativ mit der Maßtabelle unten anzeichnen.
-   - Kacheln in Nummernreihenfolge (K1, K2, K3 …) anschrauben. Jede weitere Kachel von vorne auf die
-     Schwalbenschwanz-Zapfen der schon montierten Kacheln drücken, dann festschrauben.`}
-   ${F.labels ? '- In jeder Tasche steht die Nummer des passenden Teils, die gleiche Nummer steht unter dem Teil.\n     Der Pfeil in der Tasche zeigt nach oben. Teil so drehen, dass sein Pfeil (Unterseite) in dieselbe Richtung zeigt.\n' : ''}   ${F.fit === 'magnet' ? `- Magnete (${st.magnets * 2} Stück, ${F.magD} × ${F.magH} mm) mit einem Tropfen Sekundenkleber einsetzen: je einer in die Tasche und einer unter das Teil.\n     WICHTIG: Polung prüfen! Alle Taschen-Magnete mit derselben Seite nach oben, die Teil-Magnete so, dass sie angezogen werden.\n     Danach lassen sich die Teile jederzeit abnehmen und umstecken.\n     Teile über Schrauben haben eine größere Aussparung: dort hält ein Magnet direkt am Schraubenkopf (Stahlschraube).` : F.fit === 'press' ? '- Zum Schluss jedes Teil in seine Tasche drücken (Klemmsitz, kein Kleber). Zum Lösen vorsichtig mit einer Zange ziehen.' : '- Zum Schluss jedes Teil mit einem Tropfen Kleber in seine Tasche setzen.'}
-   - Die Teile über den Schrauben haben unten eine Aussparung für den Schraubenkopf.
-${mp.list.length ? `\nMaßtabelle Schraublöcher (ab linker oberer Ecke des Paneels, von vorne gesehen):\n${mp.list.map(q => `  S${q.n} (Kachel ${q.t}): ${q.cx.toFixed(1)} cm von links, ${q.cy.toFixed(1)} cm von oben`).join('\n')}\n` : ''}${mount === 'tape' ? `\nKlebepads je Kachel: ${tiles.map(t => `K${t.id}: ${t.pads.length} (ca. ${t.grams} g)`).join(', ')}\n` : ''}${st.shortened ? `\nHinweis: ${st.shortened} Spitzen wurden gekürzt, damit sie ohne Stützen druckbar sind.\n` : ''}${st.oversize ? `\nACHTUNG: ${st.oversize} Rahmenkachel(n) sind größer als das Druckbett – in der App „Kachelgröße“ verkleinern.\n` : ''}`});
   return files;
 }
 
@@ -2407,6 +2405,7 @@ const pt = (o) => ({ type: 'vortex', x: 0, y: 0, strength: 1.5, lean: 2, opening
 const PRESETS = [
   // ---- Kollektion: eigene Designs ----
   // vom Nutzer gestaltet (aus „Meine Vorlagen“ übernommen, vollständige Projekte)
+  { name: "Übernahme", group: 'Kollektion', size: {"shape": "rect", "w": 292, "h": 312}, full: {"v": 2, "name": "Übernahme", "size": {"shape": "rect", "w": 292, "h": 312}, "pieces": {"tiling": "cairo", "cell": 26, "gap": 0.3, "minHeight": 4.5, "tip": 24, "jitter": 0.26, "seed": 137, "edge": "clip", "cut": 0, "cap": 0, "bulge": 0.59, "bend": 0, "subdiv": 0.5, "subMode": "random", "zone": 0, "pillar": false, "taper": 0, "tipMin": 1.5, "form": "pyramid", "fold": 0.6, "ridgeLen": 0.55, "pillowH": 6, "removed": [], "forceFlat": [], "forceSharp": [], "stretch": 2.4, "focusX": 0, "focusY": 0, "top": 0, "stepTops": 1, "flatTops": false, "mirror": "none", "cover": false, "hole": 0, "floor": 0, "wild": 0, "plinth": true, "edgeRound": 0, "steps": 0, "openHoles": true, "overCut": true}, "surface": {"type": "bowl", "depth": 24, "freq": 1.7, "angle": -84}, "movement": {"points": [{"type": "vortex", "x": 0, "y": 0, "strength": 1.5, "lean": 2, "opening": 0.85, "radius": 100, "fade": 200, "angle": 0, "spin": 1, "calm": false, "sun": true}]}, "mask": {"type": "none", "size": 1.08, "x": 0, "y": 0, "rot": 0, "invert": false, "text": "A", "color": "", "img": null}, "frame": {"show": true, "base": 3, "wall": 2, "depth": 5, "tile": 320, "screws": 2, "screwD": 3.5, "headD": 7, "connectors": false, "fit": "glue", "pressClear": 0.15, "squeeze": 0.25, "labels": true, "magD": 6, "magH": 2, "mount": "wall", "screwPlan": "spread", "padLoad": 400, "light": true, "lightRim": 2, "edgeW": 0, "edgeH": 0}, "colors": {"by": "gradient", "angle": 120, "seed": 42, "reverse": false, "bands": ["#000000", "#ec008c"], "frame": "#ec008c", "overrides": [], "weights": [1, 1], "repeat": 1, "arms": 3, "twist": 1, "pingpong": false, "center": "panel", "fil": ["GFA00:10101", "GFA00:10202"], "frameFil": "GFA00:10202", "mix": 0.5, "top": "", "topT": 1.2, "img": null}, "print": {"printer": "h2d2", "bedW": 325, "bedD": 320, "overhang": 55, "clearance": 0.25, "infill": 30, "frameInfill": 60, "minTip": 2.5, "maxSlender": 4, "freeOver": 1.5, "autoShort": true}} },
   { name: "Tropfen", group: 'Kollektion', size: {"shape": "circle", "w": 600, "h": 600}, full: {"v":2,"name":"Tropfen","size":{"shape":"circle","w":600,"h":600},"pieces":{"tiling":"hex","cell":30,"gap":0.3,"minHeight":4,"tip":8,"jitter":0.6,"seed":7,"edge":"clip","cut":0,"cap":0,"bulge":0,"bend":0,"subdiv":0.5,"subMode":"random","zone":0,"pillar":true,"taper":0,"tipMin":1.5,"form":"pillar","fold":0.6,"ridgeLen":0.55,"pillowH":6,"top":0.5,"removed":[],"forceFlat":[],"forceSharp":[],"cover":false},"surface":{"type":"crater","depth":19,"freq":3.6,"angle":30},"movement":{"points":[]},"mask":{"type":"none","size":0.8,"x":0,"y":0,"rot":0,"invert":false,"text":"A","color":"","img":null},"frame":{"show":true,"base":3,"wall":2,"depth":5,"tile":300,"screws":2,"screwD":3.5,"headD":7,"connectors":true,"fit":"press","pressClear":0.15,"squeeze":0.25,"labels":true,"magD":6,"magH":2,"mount":"wall","screwPlan":"rows","padLoad":400,"light":true,"lightRim":2,"edgeW":10,"edgeH":11},"colors":{"by":"rings","angle":90,"seed":3,"reverse":false,"bands":["#ffffff","#0056b8","#00b1b7","#0a2989"],"frame":"#ffffff","overrides":[{"x":-290.8,"y":-50.5,"c":"#0a2989","f":"GFA00:10601"}],"weights":[],"repeat":2,"arms":3,"twist":1,"pingpong":false,"center":"panel","fil":["GFA00:10100","GFA00:10604","GFA00:10605","GFA00:10601"],"frameFil":"GFA00:10100","img":null},"print":{"printer":"h2d2","bedW":325,"bedD":320,"overhang":55,"clearance":0.25,"infill":15,"frameInfill":50,"minTip":4}} },
   { name: "Kristall", group: 'Kollektion', size: {"shape": "rect", "w": 500, "h": 500}, full: {"v":2,"name":"Kristall","size":{"shape":"rect","w":500,"h":500},"pieces":{"tiling":"cairo","cell":39,"gap":0.3,"minHeight":6,"tip":24,"jitter":0.26,"seed":137,"edge":"clip","cut":0,"cap":0,"bulge":0.59,"bend":0,"subdiv":0.5,"subMode":"random","zone":0,"pillar":false,"taper":0,"tipMin":1.5,"form":"pyramid","fold":0.6,"ridgeLen":0.55,"pillowH":6,"removed":[{"x":233.2,"y":225.7},{"x":-225.7,"y":233.2},{"x":225.7,"y":-233.2},{"x":-233.2,"y":-225.7}],"forceFlat":[],"forceSharp":[],"stretch":2.4,"focusX":0,"focusY":0,"top":0,"stepTops":1,"flatTops":false,"mirror":"none","cover":false,"hole":0,"floor":0},"surface":{"type":"peak","depth":22,"freq":1.7,"angle":-84,"offset":0.01,"seed":25},"movement":{"points":[{"type":"magnet","x":53,"y":-145,"strength":-1.1,"lean":2,"opening":-0.1,"radius":34,"fade":174,"angle":90,"spin":-1,"calm":false}]},"mask":{"type":"none","size":1.08,"x":0,"y":0,"rot":0,"invert":false,"text":"A","color":"","img":null},"frame":{"show":true,"base":3,"wall":2,"depth":5,"tile":300,"screws":2,"screwD":3.5,"headD":7,"connectors":true,"fit":"press","pressClear":0.15,"squeeze":0.25,"labels":true,"magD":6,"magH":2,"mount":"wall","screwPlan":"spread","padLoad":400},"colors":{"by":"rings","angle":116,"seed":42,"reverse":false,"bands":["#a3d8e1","#00b1b7","#5b6579","#042f56"],"frame":"#042f56","overrides":[{"x":-222.6,"y":-211.1,"c":"#042f56","f":"GFA01:11602"}],"weights":[1,1,1,1],"repeat":1,"arms":3,"twist":1,"pingpong":false,"center":"panel","fil":["GFA01:11601","GFA00:10605","GFA00:10602","GFA01:11602"],"frameFil":"GFA01:11602","mix":0.16,"top":"","topT":1.2,"img":null},"print":{"printer":"h2d","bedW":325,"bedD":320,"overhang":55,"clearance":0.25}} },
   { name: "Herzschlag", group: 'Kollektion', size: {"shape": "rect", "w": 600, "h": 600}, full: {"v":2,"name":"Herzschlag","size":{"shape":"rect","w":600,"h":600},"pieces":{"tiling":"square","cell":30,"gap":0,"minHeight":4,"tip":20,"jitter":0.6,"seed":7,"edge":"clip","cut":0,"cap":0,"bulge":0,"bend":0,"subdiv":0.5,"subMode":"random","zone":290,"pillar":false,"taper":0,"tipMin":0,"form":"pyramid","fold":0.6,"ridgeLen":0.55,"pillowH":6,"top":0,"mirror":"none","removed":[],"cover":true,"wild":0,"hole":0,"floor":0,"steps":0,"forceFlat":[{"x":-285,"y":-45},{"x":-285,"y":-15},{"x":-285,"y":15},{"x":-285,"y":45},{"x":-285,"y":75},{"x":-285,"y":105},{"x":-15,"y":225},{"x":-45,"y":225},{"x":-45,"y":255},{"x":-75,"y":255},{"x":-105,"y":255},{"x":-135,"y":255},{"x":-165,"y":255},{"x":-165,"y":285},{"x":-15,"y":195},{"x":15,"y":195},{"x":15,"y":225},{"x":15,"y":255},{"x":-15,"y":255},{"x":-15,"y":285},{"x":-45,"y":285},{"x":15,"y":285},{"x":45,"y":285},{"x":45,"y":255},{"x":45,"y":225},{"x":75,"y":255},{"x":105,"y":255},{"x":135,"y":255},{"x":285,"y":-45},{"x":285,"y":-15},{"x":285,"y":15},{"x":285,"y":45},{"x":255,"y":-135},{"x":255,"y":-105},{"x":255,"y":-75},{"x":255,"y":-45},{"x":225,"y":-75},{"x":225,"y":-105},{"x":225,"y":-135},{"x":225,"y":-165},{"x":195,"y":-195},{"x":195,"y":-165},{"x":195,"y":-135},{"x":195,"y":-105},{"x":165,"y":-135},{"x":165,"y":-165},{"x":165,"y":-225},{"x":165,"y":-195},{"x":135,"y":-195},{"x":135,"y":-165},{"x":135,"y":-225},{"x":135,"y":-255},{"x":105,"y":-255},{"x":105,"y":-225},{"x":105,"y":-195},{"x":75,"y":-255},{"x":75,"y":-225},{"x":45,"y":-255},{"x":45,"y":-285},{"x":15,"y":-285},{"x":-15,"y":-285},{"x":-45,"y":-285},{"x":-45,"y":-255},{"x":-75,"y":-255},{"x":-75,"y":-225},{"x":-105,"y":-255},{"x":-105,"y":-225},{"x":-135,"y":-255},{"x":-135,"y":-225},{"x":-105,"y":-195},{"x":-135,"y":-195},{"x":-135,"y":-165},{"x":-165,"y":-225},{"x":-165,"y":-195},{"x":-165,"y":-165},{"x":-165,"y":-135},{"x":-195,"y":-195},{"x":-195,"y":-165},{"x":-195,"y":-105},{"x":-195,"y":-135},{"x":-225,"y":-165},{"x":-225,"y":-135},{"x":-225,"y":-105},{"x":-225,"y":-75},{"x":-255,"y":-135},{"x":-255,"y":-105},{"x":-255,"y":-75},{"x":-255,"y":-45}],"forceSharp":[],"edgeRound":0},"surface":{"type":"flat","depth":0,"freq":2,"angle":30},"movement":{"points":[{"type":"magnet","x":0,"y":0,"strength":-1.7,"lean":2.4,"opening":0.45,"radius":40,"fade":300,"angle":0,"spin":1,"calm":false,"sun":true,"width":0}]},"mask":{"type":"none","size":0.8,"x":0,"y":0,"rot":0,"invert":false,"text":"A","color":"","img":null},"frame":{"show":true,"base":3,"wall":2,"depth":5,"tile":300,"screws":2,"screwD":3.5,"headD":7,"connectors":true,"fit":"press","pressClear":0.15,"squeeze":0.25,"labels":true,"magD":6,"magH":2,"mount":"wall","screwPlan":"spread","padLoad":400},"colors":{"by":"radial","angle":90,"seed":3,"reverse":false,"bands":["#bb3d43","#000000"],"frame":"#f7e6de","overrides":[{"x":-15,"y":195,"c":"#000000","f":"GFA01:11101"},{"x":15,"y":195,"c":"#000000","f":"GFA01:11101"},{"x":-225,"y":-15,"c":"#bb3d43","f":"GFA01:11202"},{"x":-225,"y":15,"c":"#bb3d43","f":"GFA01:11202"},{"x":-225,"y":45,"c":"#bb3d43","f":"GFA01:11202"},{"x":-195,"y":75,"c":"#bb3d43","f":"GFA01:11202"},{"x":-225,"y":75,"c":"#bb3d43","f":"GFA01:11202"},{"x":-225,"y":105,"c":"#bb3d43","f":"GFA01:11202"},{"x":-195,"y":105,"c":"#bb3d43","f":"GFA01:11202"},{"x":-225,"y":135,"c":"#bb3d43","f":"GFA01:11202"},{"x":-195,"y":135,"c":"#bb3d43","f":"GFA01:11202"},{"x":-225,"y":165,"c":"#bb3d43","f":"GFA01:11202"},{"x":-195,"y":165,"c":"#bb3d43","f":"GFA01:11202"},{"x":-195,"y":195,"c":"#bb3d43","f":"GFA01:11202"},{"x":-165,"y":135,"c":"#bb3d43","f":"GFA01:11202"},{"x":-165,"y":165,"c":"#bb3d43","f":"GFA01:11202"},{"x":-135,"y":165,"c":"#bb3d43","f":"GFA01:11202"},{"x":-165,"y":195,"c":"#bb3d43","f":"GFA01:11202"},{"x":-135,"y":195,"c":"#bb3d43","f":"GFA01:11202"},{"x":-105,"y":195,"c":"#bb3d43","f":"GFA01:11202"},{"x":-75,"y":195,"c":"#bb3d43","f":"GFA01:11202"},{"x":-75,"y":225,"c":"#bb3d43","f":"GFA01:11202"},{"x":-105,"y":225,"c":"#bb3d43","f":"GFA01:11202"},{"x":-135,"y":225,"c":"#bb3d43","f":"GFA01:11202"},{"x":-165,"y":225,"c":"#bb3d43","f":"GFA01:11202"},{"x":75,"y":195,"c":"#bb3d43","f":"GFA01:11202"},{"x":75,"y":225,"c":"#bb3d43","f":"GFA01:11202"},{"x":105,"y":225,"c":"#bb3d43","f":"GFA01:11202"},{"x":105,"y":195,"c":"#bb3d43","f":"GFA01:11202"},{"x":135,"y":195,"c":"#bb3d43","f":"GFA01:11202"},{"x":135,"y":165,"c":"#bb3d43","f":"GFA01:11202"},{"x":165,"y":165,"c":"#bb3d43","f":"GFA01:11202"},{"x":165,"y":225,"c":"#bb3d43","f":"GFA01:11202"},{"x":135,"y":225,"c":"#bb3d43","f":"GFA01:11202"},{"x":165,"y":195,"c":"#bb3d43","f":"GFA01:11202"},{"x":195,"y":195,"c":"#bb3d43","f":"GFA01:11202"},{"x":165,"y":135,"c":"#bb3d43","f":"GFA01:11202"},{"x":195,"y":135,"c":"#bb3d43","f":"GFA01:11202"},{"x":195,"y":165,"c":"#bb3d43","f":"GFA01:11202"},{"x":225,"y":165,"c":"#bb3d43","f":"GFA01:11202"},{"x":225,"y":135,"c":"#bb3d43","f":"GFA01:11202"},{"x":225,"y":105,"c":"#bb3d43","f":"GFA01:11202"},{"x":195,"y":105,"c":"#bb3d43","f":"GFA01:11202"},{"x":195,"y":75,"c":"#bb3d43","f":"GFA01:11202"},{"x":225,"y":75,"c":"#bb3d43","f":"GFA01:11202"},{"x":225,"y":15,"c":"#bb3d43","f":"GFA01:11202"},{"x":225,"y":45,"c":"#bb3d43","f":"GFA01:11202"},{"x":225,"y":-15,"c":"#bb3d43","f":"GFA01:11202"},{"x":-15,"y":-225,"c":"#bb3d43","f":"GFA01:11202"},{"x":15,"y":-225,"c":"#bb3d43","f":"GFA01:11202"},{"x":-255,"y":135,"c":"#bb3d43","f":"GFA01:11202"},{"x":-255,"y":105,"c":"#bb3d43","f":"GFA01:11202"},{"x":-255,"y":75,"c":"#bb3d43","f":"GFA01:11202"},{"x":-255,"y":45,"c":"#bb3d43","f":"GFA01:11202"},{"x":-255,"y":15,"c":"#bb3d43","f":"GFA01:11202"},{"x":-195,"y":-75,"c":"#bb3d43","f":"GFA01:11202"},{"x":-225,"y":-45,"c":"#bb3d43","f":"GFA01:11202"},{"x":255,"y":15,"c":"#bb3d43","f":"GFA01:11202"},{"x":255,"y":45,"c":"#bb3d43","f":"GFA01:11202"},{"x":255,"y":75,"c":"#bb3d43","f":"GFA01:11202"},{"x":255,"y":105,"c":"#bb3d43","f":"GFA01:11202"},{"x":255,"y":135,"c":"#bb3d43","f":"GFA01:11202"},{"x":195,"y":-75,"c":"#bb3d43","f":"GFA01:11202"},{"x":225,"y":-45,"c":"#bb3d43","f":"GFA01:11202"},{"x":75,"y":-195,"c":"#bb3d43","f":"GFA01:11202"},{"x":-75,"y":-195,"c":"#bb3d43","f":"GFA01:11202"},{"x":-45,"y":-225,"c":"#bb3d43","f":"GFA01:11202"},{"x":45,"y":-225,"c":"#bb3d43","f":"GFA01:11202"},{"x":15,"y":-255,"c":"#bb3d43","f":"GFA01:11202"},{"x":-15,"y":-255,"c":"#bb3d43","f":"GFA01:11202"},{"x":-255,"y":-15,"c":"#bb3d43","f":"GFA01:11202"},{"x":255,"y":-15,"c":"#bb3d43","f":"GFA01:11202"}],"weights":[],"repeat":1,"arms":3,"twist":1,"pingpong":false,"center":"panel","fil":["GFA01:11202","GFA01:11101"],"frameFil":"GFA00:10201","img":null},"print":{"printer":"h2d","bedW":325,"bedD":320,"overhang":55,"clearance":0.25}} },
@@ -2547,7 +2546,7 @@ function normalize(P) {
   return out;
 }
 
-return { DEFAULT, clone, rng, amin, amax, area, centroid, inset, outlineTest, outlineSeg, outlinePolygon, makeCells, sampleImage, mirrorXY, maskAt, surfaceAt, fieldAt, FILAMENTS, FIL_SERIES, filKey, filamentByKey, filamentFor, nearestFilament, filLabel, qrEncode, decodeQRGrid, qrModuleAt, qrCover, qrProject, PRINTERS, bed, build, splitByPlane, capSplit, flipOntoTop, barHalfWidth, markPolys, labelDecals, formOf, profileOf, pieceMesh, cupMesh, fillerMesh, meshVolume, stats, layoutPlates, mapSVG, colorName, mountPlan, printKitFiles, zip, buildKitZip, PRESETS, bambuize, presetProject, randomDesign, normalize, prismMesh: prism };
+return { DEFAULT, clone, rng, amin, amax, area, centroid, inset, outlineTest, outlineSeg, outlinePolygon, makeCells, sampleImage, mirrorXY, maskAt, surfaceAt, fieldAt, FILAMENTS, FIL_SERIES, filKey, filamentByKey, filamentFor, nearestFilament, filLabel, qrEncode, decodeQRGrid, qrModuleAt, qrCover, qrProject, PRINTERS, bed, build, splitByPlane, capSplit, flipOntoTop, barHalfWidth, markPolys, labelDecals, formOf, profileOf, pieceMesh, cupMesh, fillerMesh, meshVolume, stats, layoutPlates, mapSVG, mapPDF, colorName, mountPlan, printKitFiles, zip, buildKitZip, PRESETS, bambuize, presetProject, randomDesign, normalize, prismMesh: prism };
 })();
 const Renderer = (() => {
 // Kleiner WebGL2-Renderer mit Schattenwurf für die Paneel-Vorschau
@@ -3052,8 +3051,8 @@ const SECTIONS = [
     P.frame.fit === 'press' ? slider('Klemmung', 'wie stramm die Rippen drücken', () => P.frame.squeeze, (v, p) => { p.frame.squeeze = v; }, 0.05, 0.6, 0.05, 'mm') : null,
     P.frame.fit === 'press' ? slider('Spiel am Sockel', 'Abstand Sockel ↔ Taschenwand', () => P.frame.pressClear, (v, p) => { p.frame.pressClear = v; }, 0, 0.5, 0.05, 'mm') : slider('Spiel in der Tasche', '', () => P.print.clearance, (v, p) => { p.print.clearance = v; }, 0, 1, 0.05, 'mm'),
     P.frame.fit === 'press' ? el('p', { class: 'hint' }, 'Tipp: Im Druckkit liegt ein Passungstest (ein Teil + Tasche). Erst den drucken und die Klemmung danach einstellen.') : null,
-    check('Teilnummer + Pfeil eingravieren (Tasche und Teil-Unterseite)', () => P.frame.labels, (v, p) => { p.frame.labels = v; }),
-    P.frame.labels ? el('p', { class: 'hint' }, 'Jede Tasche zeigt die Nummer des Teils, das hineingehört. Der Pfeil zeigt nach oben – das Teil hat unten denselben Pfeil: beide Pfeile übereinander legen. Ansicht „Nur Rahmen“ zeigt die Beschriftung.') : null,
+    check('Teilnummer + Pfeil unter jedem Teil eingravieren', () => P.frame.labels, (v, p) => { p.frame.labels = v; }),
+    P.frame.labels ? el('p', { class: 'hint' }, 'Jedes Teil hat unten seine Nummer und einen Pfeil, der nach oben zeigt. Wo welche Nummer hingehört, steht auf der Karte (A4-PDF im Druckkit). Der Rahmen bleibt ohne Gravur.') : null,
     sub('Befestigung an der Wand'), seg('Befestigung', [['wall', 'Schrauben in die Wand'], ['board', 'Auf Trägerplatte'], ['tape', 'Klebepads (ohne Bohren)']], () => P.frame.mount || 'wall', (v, p) => { p.frame.mount = v; }),
     el('p', { class: 'hint' }, ({ wall: 'Jede Kachel wird mit Senkkopfschrauben in Dübeln befestigt. Im Druckkit liegt eine Bohrschablone 1:1 mit Maßtabelle.', board: 'Die Kacheln werden auf eine Holzplatte (6–10 mm) geschraubt, die Platte hängt wie ein Bild an zwei Aufhängern. Ideal für große Paneele und zum Umhängen. Zuschnitt-Schablone 1:1 im Druckkit.', tape: 'Ohne Bohren, z. B. für Mietwohnungen: doppelseitige Klebepads auf der Rückseite. Die Kacheln haben keine Schraublöcher. Nur für glatte, tragfähige Wände und leichtere Paneele.' })[P.frame.mount || 'wall']),
     P.frame.mount === 'tape' ? slider('Tragkraft pro Pad', 'mit 4-facher Sicherheit gerechnet (Pad mit 2 kg Angabe → 500 g)', () => P.frame.padLoad || 400, (v, p) => { p.frame.padLoad = v; }, 100, 1500, 50, 'g') : null,
@@ -3070,13 +3069,12 @@ const SECTIONS = [
     el('div', { class: 'row' }, el('button', { class: 'btn sm', title: 'Leichtbau mit 1,5-mm-Steg, Boden 2,2 mm, Wand 1,6 mm, Tiefe 4 mm, Teile 12 % Füllung', onclick: () => change(p => { p.frame.light = true; p.frame.lightRim = 1.5; p.frame.base = 2.2; p.frame.wall = 1.6; p.frame.depth = 4; p.print.infill = 12; p.print.frameInfill = 40; }, true) }, '⚡ Sparmodus: so wenig Filament wie möglich'), el('span', { class: 'hint', style: 'margin-left:8px' }, 'setzt Rahmen und Füllung auf sparsame Werte')),
     check('Leichtbau – Taschenboden ausgespart, spart Filament', () => !!P.frame.light, (v, p) => { p.frame.light = v; if (v && p.frame.lightRim == null) p.frame.lightRim = 2; }),
     P.frame.light ? slider('Auflage-Steg', 'Breite des Rands, auf dem jedes Teil aufliegt – 1,5 mm = offenes Gitter', () => P.frame.lightRim == null ? 4 : P.frame.lightRim, (v, p) => { p.frame.lightRim = v; }, 1.2, 8, 0.1, 'mm') : null,
-    P.frame.light && P.frame.labels ? check('Nummern-Steg in offenen Taschen – ein schmaler Steg mit Nummer und Pfeil zum Einsetzen', () => P.frame.lightLabels !== false, (v, p) => { p.frame.lightLabels = v; }) : null,
-    P.frame.light ? el('p', { class: 'hint' }, P.frame.labels && P.frame.lightLabels !== false ? 'Taschen mit Schraube, Magnet oder Steckverbinder behalten ihren Boden. Alle anderen sind offen, nur ein schmaler Steg trägt Nummer und Pfeil.' : 'Taschen mit Schraube, Magnet oder Steckverbinder behalten ihren Boden. Offene Taschen haben keine Gravur – Nummer und Pfeil stehen unter jedem Teil, die Position auf der Karte 1:1.') : null,
+    P.frame.light ? el('p', { class: 'hint' }, 'Taschen mit Schraube, Magnet oder Steckverbinder behalten ihren Boden. Alle anderen sind offen – die Position jedes Teils steht auf der Karte (A4-PDF).') : null,
     sub('Rand'), slider('Breiterer Rand', 'Rahmen steht rundum seitlich über (0 = aus)', () => P.frame.edgeW || 0, (v, p) => { p.frame.edgeW = v; }, 0, 40, 1, 'mm'),
     slider('Höherer Rand', 'umlaufender Wulst über die Taschen hinaus (0 = aus)', () => P.frame.edgeH || 0, (v, p) => { p.frame.edgeH = v; }, 0, 25, 0.5, 'mm'),
     (P.frame.edgeW || 0) > 0 || (P.frame.edgeH || 0) > 0 ? check('Runde Ecken am Rand', () => !!P.frame.edgeRound, (v, p) => { p.frame.edgeRound = v; }) : null,
     (P.frame.edgeW || 0) > 0 || (P.frame.edgeH || 0) > 0 ? (P.pieces.edge === 'clip' ? null : el('p', { class: 'hint' }, 'Der Rand braucht „Exakter Umriss“ unter Größe.')) : null,
-    sub('Füllung (für Gewicht und LIESMICH)'),
+    sub('Füllung (für Gewicht)'),
     slider('Füllung Teile', 'Infill im Slicer – 10–15 % reicht für Deko-Teile', () => P.print.infill == null ? 30 : P.print.infill, (v, p) => { p.print.infill = v; }, 5, 100, 1, '%'),
     slider('Füllung Rahmen', 'Klemmrippen brauchen 3 Wände, die Füllung kann niedrig sein', () => P.print.frameInfill == null ? 60 : P.print.frameInfill, (v, p) => { p.print.frameInfill = v; }, 10, 100, 5, '%'),
     sub('Drucker'),
@@ -3682,7 +3680,7 @@ $('#bPresets').addEventListener('click', () => {
 });
 
 // Start
-const BUILD_TAG = '09.11. 14:49'; { const b = $('#buildTag'); if (b) { b.textContent = 'Stand ' + BUILD_TAG; b.title = 'Version der App'; } }
+const BUILD_TAG = '10.11. 11:01'; { const b = $('#buildTag'); if (b) { b.textContent = 'Stand ' + BUILD_TAG; b.title = 'Version der App'; } }
 renderSections();
 initGL();
 window.relief = { get renderer() { return renderer; }, get model() { return model; } };
